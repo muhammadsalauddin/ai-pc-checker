@@ -1,0 +1,8 @@
+# AI PC Suitability Checker - Dependencies
+# Install with: pip install -r requirements.txt
+
+psutil>=5.9.0        # CPU, RAM, disk info
+rich>=13.0.0         # Beautiful terminal output (CLI version)
+gputil>=1.4.0        # NVIDIA GPU info (via nvidia-smi)
+py-cpuinfo>=9.0.0    # Detailed CPU info (name, flags, AVX2)
+flask>=3.0.0         # Web dashboard server
