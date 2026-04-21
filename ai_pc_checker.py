@@ -23,6 +23,15 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Any
 
+from model_catalog import (
+    build_coding_recommendations,
+    build_live_catalog_results,
+    build_quickstart,
+    build_upgrade_recommendations,
+    get_live_ollama_catalog,
+    has_gpu_acceleration,
+)
+
 # ─────────────────────────────────────────────────────────────────
 # STEP 0 ─ AUTO-INSTALL MISSING DEPENDENCIES
 # ─────────────────────────────────────────────────────────────────
@@ -1324,9 +1333,8 @@ def compute_ai_score(
     elif cores >=  4:                 score += 4
     else:                             score += 1
 
-    # CUDA bonus (0-5 pts)
-    has_cuda = any(g["cuda"] for g in gpu_list)
-    if has_cuda:
+    # GPU acceleration bonus (0-5 pts)
+    if has_gpu_acceleration(gpu_list):
         score += 5
 
     score = min(100, score)
@@ -1541,9 +1549,42 @@ def print_score_section(score: int, rating: str):
     console.print()
 
 
+def print_coding_recommendations(recommendations: List[Dict], catalog_info: Dict):
+    console.print(Rule("[bold bright_cyan]  BEST LOCAL CODING MODELS[/bold bright_cyan]", style="bright_cyan"))
+    console.print(
+        f"  [dim]Catalog source:[/dim] {catalog_info.get('source_label', 'unknown')}"
+        f"  [dim]· families loaded:[/dim] {catalog_info.get('family_count', 0)}\n"
+    )
+
+    if not recommendations:
+        console.print("  [dim]No coding models found in the live catalog.[/dim]\n")
+        return
+
+    t = Table(show_header=True, header_style="bold dim", box=box.SIMPLE_HEAVY, padding=(0, 1), expand=False)
+    t.add_column("Status", min_width=11, no_wrap=True)
+    t.add_column("Family", min_width=22, style="bold")
+    t.add_column("Best Size", min_width=10)
+    t.add_column("Quality", min_width=8)
+    t.add_column("Command", min_width=30, style="bright_cyan")
+    t.add_column("Why", min_width=34, style="dim")
+
+    for model in recommendations:
+        t.add_row(
+            _status_badge(model["status"]),
+            model["name"],
+            model.get("selected_size", "latest"),
+            _quality_stars(model["quality"]),
+            model.get("ollama", "N/A"),
+            model["note"],
+        )
+
+    console.print(Padding(t, (0, 2)))
+    console.print()
+
+
 def print_compatible_models(
     results: List[Dict],
-    max_show: int = 20,
+    max_show: int = 12,
     show_all: bool = False,
 ):
     console.print(Rule("[bold white]  LOCAL AI MODEL COMPATIBILITY[/bold white]", style="white"))
@@ -1578,16 +1619,24 @@ def print_compatible_models(
         t.add_column("Platform", min_width=22)
         t.add_column("Note",     min_width=30, style="dim")
 
-        for m in models:
+        shown = 0
+        visible_models = [m for m in models if show_all or m["status"] != "no"]
+        for m in visible_models:
             if m["status"] == "no" and not show_all:
                 continue
             badge   = _status_badge(m["status"])
             stars   = _quality_stars(m["quality"])
             size    = f"{m['model_size_gb']:.1f} GB"
             plat    = ", ".join(m["platforms"][:2])
-            t.add_row(badge, m["name"], size, stars, plat, m["note"])
+            model_name = f"{m['name']} ({m.get('selected_size', 'latest')})"
+            t.add_row(badge, model_name, size, stars, plat, m["note"])
+            shown += 1
+            if not show_all and shown >= max_show:
+                break
 
         console.print(Padding(t, (0, 2)))
+        if not show_all and len(visible_models) > shown:
+            console.print(f"  [dim]Showing top {shown} of {len(visible_models)} model families in {cat}.[/dim]")
         console.print()
 
 
@@ -1618,13 +1667,9 @@ def print_install_guides(results: List[Dict]):
         )
 
 
-def print_quick_start(results: List[Dict]):
-    console.print(Rule("[bold bright_green]  QUICK START — TOP 5 COMMANDS[/bold bright_green]", style="bright_green"))
-    console.print("  [dim]Run these in your terminal after installing Ollama:[/dim]\n")
-
-    top = [r for r in results if r["status"] in ("excellent","good") and r.get("ollama")][:5]
-    if not top:
-        top = [r for r in results if r.get("ollama")][:5]
+def print_quick_start(quickstart: List[Dict]):
+    console.print(Rule("[bold bright_green]  QUICK START — TOP COMMANDS[/bold bright_green]", style="bright_green"))
+    console.print("  [dim]These are chosen from the live catalog based on your current hardware, with coding models first.[/dim]\n")
 
     t = Table(box=box.SIMPLE, show_header=True, header_style="bold dim", padding=(0, 2))
     t.add_column("#",       min_width=3,  justify="right", style="dim")
@@ -1632,48 +1677,23 @@ def print_quick_start(results: List[Dict]):
     t.add_column("Command", min_width=38, style="bright_cyan")
     t.add_column("Good For",min_width=28, style="dim")
 
-    for i, r in enumerate(top, 1):
+    for i, r in enumerate(quickstart, 1):
         tags = r.get("tags", [])
         tag_str = " · ".join(tags[:3])
-        t.add_row(str(i), r["name"], r["ollama"], tag_str)
+        label = f"{r['name']} ({r.get('selected_size', 'latest')})"
+        t.add_row(str(i), label, r["ollama"], tag_str)
 
     console.print(Padding(t, (0, 2)))
     console.print()
 
 
-def print_upgrade_tips(score: int, ram: Dict, gpus: List[Dict]):
-    """Targeted upgrade advice if score is below 75."""
-    if score >= 90:
+def print_upgrade_tips(tips: List[Dict]):
+    if not tips:
         return
 
     console.print(Rule("[bold orange3]  UPGRADE RECOMMENDATIONS[/bold orange3]", style="orange3"))
-    tips = []
-    vram = max((g["vram_gb"] for g in gpus), default=0)
-
-    if vram < 8:
-        tips.append(
-            "🎯 [bold]Priority #1 — GPU:[/bold] Upgrade to a GPU with 8GB+ VRAM (RTX 3060 or better)\n"
-            "   This single upgrade will unlock most 7B language models with GPU acceleration."
-        )
-    if vram < 16:
-        tips.append(
-            "🎯 [bold]GPU VRAM:[/bold] 16GB VRAM (RTX 3080 / RX 6800 XT) enables 13B+ models and SDXL."
-        )
-    if ram["total_gb"] < 16:
-        tips.append(
-            "💾 [bold]RAM:[/bold] Upgrade to 16GB+ RAM for comfortable CPU inference of 7B models."
-        )
-    if ram["total_gb"] < 32:
-        tips.append(
-            "💾 [bold]RAM:[/bold] 32GB RAM allows running larger models and multiple tools simultaneously."
-        )
-    if not any(g["cuda"] for g in gpus):
-        tips.append(
-            "⚡ [bold]CUDA:[/bold] An NVIDIA GPU provides CUDA acceleration — 10-30× faster AI inference."
-        )
-
-    for tip in tips[:4]:
-        console.print(Padding(f"  {tip}", (0, 2, 1, 2)))
+    for tip in tips:
+        console.print(Padding(f"  [bold]{tip['title']}[/bold]\n  [dim]{tip['body']}[/dim]", (0, 2, 1, 2)))
 
 
 def save_report(
@@ -1743,10 +1763,20 @@ def main():
     # ── Match GPUs to DB ─────────────────────────────────────────
     gpu_matches = [match_gpu(g["name"]) for g in gpus]
     best_vram   = max((g["vram_gb"] for g in gpus), default=0)
-    has_cuda    = any(g["cuda"] for g in gpus)
+    has_gpu_accel = has_gpu_acceleration(gpus)
 
-    # ── Check model compatibility ─────────────────────────────────
-    results = check_ai_compatibility(ram["total_gb"], best_vram, has_cuda)
+    # ── Live model catalog + compatibility ────────────────────────
+    catalog = get_live_ollama_catalog()
+    results = build_live_catalog_results(catalog, ram["total_gb"], best_vram, has_gpu_accel)
+    coding_recommendations = build_coding_recommendations(results)
+    quickstart = build_quickstart(results)
+    upgrade_tips = build_upgrade_recommendations(
+        results,
+        ram["total_gb"],
+        best_vram,
+        unified_memory=any(g.get("vendor") == "Apple" for g in gpus),
+        has_gpu_accel=has_gpu_accel,
+    )
 
     # ── Compute score ─────────────────────────────────────────────
     score, rating = compute_ai_score(cpu, ram, gpus, gpu_matches[0] if gpu_matches else None)
@@ -1759,10 +1789,11 @@ def main():
     print_disk_section(disks)
     print_os_section(os_info)
     print_score_section(score, rating)
+    print_coding_recommendations(coding_recommendations, catalog)
     print_compatible_models(results, show_all=False)
-    print_quick_start(results)
+    print_quick_start(quickstart)
     print_install_guides(results)
-    print_upgrade_tips(score, ram, gpus)
+    print_upgrade_tips(upgrade_tips)
     save_report(cpu, ram, gpus, disks, os_info, score, rating, results)
 
     console.print(Rule("[bold bright_cyan]  SCAN COMPLETE[/bold bright_cyan]", style="bright_cyan"))

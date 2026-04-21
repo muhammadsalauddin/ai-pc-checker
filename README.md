@@ -12,12 +12,39 @@
 |---|---|
 | **Hardware Scanner** | CPU, RAM (speed + type), GPU (VRAM + tier), Disk, OS |
 | **AI Suitability Score** | 0–100 score with S+ → F tier rating |
-| **Model Compatibility** | 25+ AI models — Text, Code, Vision, Image Gen, Speech, Embeddings |
-| **Install Commands** | One-click copy for Ollama / LM Studio per model |
+| **Live Model Catalog** | Pulls the latest Ollama Library families automatically and caches them locally |
+| **Model Compatibility** | Hardware-fit recommendations across live Text, Code, Vision, Embedding and other model families |
+| **Coding Recommendations** | Dedicated local coding-model picks based on your RAM, VRAM and GPU acceleration backend |
+| **Install Commands** | One-click Ollama commands for the best-fit size of each model family |
 | **API vs Local** | Speed (tok/s), Latency, Cost/month, Feature matrix vs 14 cloud providers |
 | **Web Dashboard** | Dark-themed browser UI, auto-opens on a free port |
 | **CLI Version** | Rich terminal output, saves `ai_pc_report.json` |
-| **Cross-platform** | Windows, Linux, macOS (web + CLI) |
+| **Cross-platform** | Windows, Linux, macOS (web + CLI) with OS-aware detection |
+
+## Platform Update
+
+The hardware detection layer now correctly adapts to each operating system:
+
+- **Windows**: Detects Windows edition/build, DirectX, CUDA, and WMI-based GPU details
+- **Linux**: Detects Linux distro/version and uses native system info plus NVIDIA tooling when available
+- **macOS**: Detects macOS version correctly and supports Apple Silicon GPU reporting through Metal
+
+Apple Silicon Macs now report:
+
+- Correct **macOS** version instead of showing Windows
+- **Apple GPU / Metal** instead of "GPU unavailable"
+- **Unified memory** as usable AI VRAM for local model recommendations and scoring
+
+## Live Catalog Update
+
+The app no longer depends on a manually maintained model list.
+
+- It pulls the current Ollama Library catalog automatically
+- It chooses the **best-fit size** for each family based on your machine
+- It shows a dedicated **Best Local Coding Models For This PC** section
+- It suggests **hardware upgrades** based on the next better coding models you are close to running
+- If Ollama is running locally, installed models automatically show an **Installed** badge in the dashboard
+- If the live catalog is temporarily unavailable, the app falls back to a local cache instead of breaking
 
 ---
 
@@ -32,7 +59,7 @@
 ### Option A — Bash (Linux / macOS / WSL / Git Bash)
 
 ```bash
-git clone https://github.com/uddin-salamd/ai-pc-checker.git
+git clone https://github.com/muhammadsalauddin/ai-pc-checker.git
 cd ai-pc-checker
 chmod +x install.sh start.sh
 ./install.sh          # sets up venv + installs dependencies
@@ -42,7 +69,7 @@ chmod +x install.sh start.sh
 ### Option B — Windows (PowerShell / CMD)
 
 ```bat
-git clone https://github.com/uddin-salamd/ai-pc-checker.git
+git clone https://github.com/muhammadsalauddin/ai-pc-checker.git
 cd "ai-pc-checker"
 pip install -r requirements.txt
 python ai_pc_web.py
@@ -57,17 +84,25 @@ Or just double-click **`run_checker.bat`**.
 python ai_pc_checker.py    # any OS
 ```
 
+When you start the app, it automatically:
+
+- scans your hardware
+- fetches the latest Ollama Library families
+- picks the best local coding models for your configuration
+- shows which memory / VRAM upgrade unlocks the next tier of models
+
 ---
 
 ## 🛠️ Scripts
 
 | Script | Purpose |
 |---|---|
-| `install.sh` | Creates `.venv`, installs all packages, verifies CUDA |
+| `install.sh` | Creates `.venv`, installs all packages, verifies GPU tooling when available |
 | `start.sh` | Activates venv, launches web server (or `--cli` flag for terminal mode) |
 | `run_checker.bat` | Windows double-click launcher for web dashboard |
 | `ai_pc_web.py` | Main Flask web application |
 | `ai_pc_checker.py` | Standalone CLI version (Rich terminal UI) |
+| `model_catalog.py` | Shared live Ollama catalog parser + recommendation engine |
 
 ---
 
@@ -88,32 +123,44 @@ All packages are **auto-installed** on first run if missing. Python **3.9+** req
 ## 🖥️ Hardware Detection
 
 - **CPU**: Name, cores (physical/logical), frequency, benchmark score, AVX2 support
-- **RAM**: Total, used, speed (MHz), type (DDR3/4/5) via WMI
-- **GPU**: VRAM, driver, CUDA version — NVIDIA via `nvidia-smi`, AMD/Intel via WMI
+- **RAM**: Total, used, and platform-specific memory details when available
+- **GPU**: VRAM, driver, CUDA/Metal acceleration — NVIDIA via `nvidia-smi`, AMD/Intel via WMI on Windows, Apple Silicon via `system_profiler` on macOS
 - **Disk**: Total/free space, read/write speed, SSD vs HDD detection
-- **OS**: Windows build, Linux distro, macOS version
+- **OS**: Automatically shows Windows build, Linux distro, or macOS version depending on the current system
+
+The recommendation engine uses this hardware profile to decide:
+
+- which coding models fit comfortably right now
+- which larger model size in a family is still realistic
+- which RAM / VRAM / unified-memory upgrade would unlock stronger local models
 
 ---
 
-## 🤖 Supported AI Models
+## 🤖 Live Model Recommendations
 
-### Text / Chat
-`Llama 3.1 8B` · `Llama 3.1 70B` · `Mistral 7B` · `Phi-3 Mini` · `Gemma 2 2B` · `Qwen 2.5 7B`
+Instead of shipping a static shortlist, the app now builds recommendations from the live Ollama catalog.
 
-### Code
-`CodeLlama 7B` · `CodeLlama 34B` · `DeepSeek Coder 6.7B` · `Starcoder2 3B`
+What you get:
 
-### Vision
-`LLaVA 7B` · `LLaVA 13B` · `BakLLaVA`
+- **Coding-first picks** for local development machines
+- **Best size per family** such as `7b`, `14b`, `24b`, `32b`, etc.
+- **Next jump** guidance showing which larger size needs more RAM or VRAM
+- **Auto-updating model coverage** when new families appear in Ollama Library
 
-### Image Generation
-`Stable Diffusion 1.5` · `Stable Diffusion XL` · `Stable Diffusion 3`
+Typical families that can appear in recommendations include:
 
-### Speech
-`Whisper Base` · `Whisper Large v3` · `Bark TTS`
+- `qwen2.5-coder`
+- `deepseek-coder-v2`
+- `starcoder2`
+- `codestral`
+- `devstral`
+- `codellama`
+- `gemma4`
+- `deepseek-r1`
+- `qwen3`
+- `nomic-embed-text`
 
-### Embeddings
-`nomic-embed-text` · `all-minilm` · `mxbai-embed-large`
+The exact list changes over time because it is driven by the live catalog rather than hardcoded entries.
 
 ---
 
@@ -152,6 +199,16 @@ Compares your hardware against **14 cloud AI providers**:
 **GPU not detected?**
 - Install NVIDIA drivers: https://www.nvidia.com/drivers
 - For AMD/Intel, WMI fallback is used automatically on Windows
+- On Apple Silicon Macs, the app uses Metal + unified memory detection instead of CUDA/DirectX
+
+**New models are not showing up yet?**
+- The app fetches the live Ollama Library catalog on startup
+- If Ollama Library cannot be reached, it uses a cached copy until the next successful refresh
+- Re-run `./start.sh` or `python ai_pc_checker.py` to refresh recommendations
+
+**OS name looks wrong?**
+- The latest version now detects Windows, Linux, and macOS separately in both the web and CLI apps
+- If you still see the wrong OS, pull the latest changes and rerun `./start.sh` or `python ai_pc_checker.py`
 
 **Flask port already in use?**
 The app auto-selects a free port on every run — this should never happen.
@@ -170,6 +227,7 @@ Install NVIDIA CUDA Toolkit: https://developer.nvidia.com/cuda-downloads
 
 ```
 ai-pc-checker/
+├── model_catalog.py    # Live Ollama catalog parser + recommendation logic
 ├── ai_pc_web.py        # Flask web dashboard (main app)
 ├── ai_pc_checker.py    # CLI version (Rich terminal UI)
 ├── requirements.txt    # Python dependencies

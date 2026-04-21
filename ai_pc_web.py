@@ -10,6 +10,16 @@ from pathlib import Path
 from datetime import datetime
 from typing  import Dict, List, Optional, Tuple
 
+from model_catalog import (
+  build_coding_recommendations,
+  build_live_catalog_results,
+  build_quickstart,
+  build_upgrade_recommendations,
+  get_live_ollama_catalog,
+  has_gpu_acceleration,
+  is_ollama_model_installed as live_is_ollama_model_installed,
+)
+
 # ─── Auto-install dependencies ───────────────────────────────────────────────
 REQUIRED = {"psutil": "psutil", "GPUtil": "gputil", "flask": "flask", "cpuinfo": "py-cpuinfo"}
 
@@ -446,7 +456,7 @@ def compute_score(cpu, ram, gpus, gpu_match):
     if gpu_match: s+=min(20,int(gpu_match.get("score",0)/5))
     cores=cpu["cores_physical"]; freq=cpu["freq_max_mhz"]/1000
     s+=15 if cores>=16 and freq>=4 else 13 if cores>=12 and freq>=3.5 else 10 if cores>=8 and freq>=3 else 7 if cores>=6 else 4 if cores>=4 else 1
-    if any(g["cuda"] for g in gpus): s+=5
+    if has_gpu_acceleration(gpus): s+=5
     s=min(100,s)
     label = "EXCELLENT — Runs top-tier local AI" if s>=90 else \
             "GREAT — Runs most local AI models" if s>=75 else \
@@ -491,21 +501,7 @@ def _fetch_ollama_installed() -> Dict[str, Dict]:
         return {}
 
 def _is_ollama_model_installed(model_record: Dict, installed: Dict[str, Dict]) -> bool:
-    """Fuzzy-match a model record name against installed Ollama model base names."""
-    name = model_record.get("name", "").lower()
-    ollama_cmd = model_record.get("ollama") or ""
-    # Extract the model tag from the ollama run command (e.g. "ollama run llama3.2:3b" -> "llama3.2")
-    cmd_model = ""
-    if "ollama run " in ollama_cmd:
-        cmd_model = ollama_cmd.replace("ollama run ", "").split(":")[0].lower().strip()
-    for key in installed:
-        if key == cmd_model:
-            return True
-        # Partial name matching (e.g. "llama3.2" in "llama 3.2 3b")
-        key_clean = key.replace("-", " ").replace(".", " ")
-        if key_clean in name or key in name:
-            return True
-    return False
+  return live_is_ollama_model_installed(model_record, installed)
 
 # ─── API vs Local Comparison Data ────────────────────────────────────────────
 # Real-world measured / published benchmarks (April 2026)
@@ -546,16 +542,16 @@ GPU_TDP = {
     "Arc A770":225,"Arc A750":225,"Arc A580":185,"Arc A380":75,
 }
 
-def build_comparison(gpu_match: Optional[Dict], gpus: List[Dict], has_cuda: bool, bench_multi: float) -> Dict:
+def build_comparison(gpu_match: Optional[Dict], gpus: List[Dict], has_gpu_accel: bool, bench_multi: float, accel_label: str) -> Dict:
     """Build the API vs Local comparison payload."""
     # Determine local tok/s: GPU if matched, fallback CPU estimate
     local_tok_s_gpu  = gpu_match["tok_s"] if gpu_match else 0
     # CPU inference estimate: ~2 tok/s per physical core at 7B Q4 (very rough)
     local_tok_s_cpu  = max(2, int(bench_multi * 1.5))
-    local_tok_s      = local_tok_s_gpu if (has_cuda and local_tok_s_gpu > 0) else local_tok_s_cpu
+    local_tok_s      = local_tok_s_gpu if (has_gpu_accel and local_tok_s_gpu > 0) else local_tok_s_cpu
 
     # Local latency: GPU ~200-400ms model-load sliding window (prompt eval), CPU ~800-2000ms
-    local_latency_ms = 250 if (has_cuda and local_tok_s_gpu >= 20) else 600 if local_tok_s_gpu >= 8 else 1500
+    local_latency_ms = 250 if (has_gpu_accel and local_tok_s_gpu >= 20) else 600 if local_tok_s_gpu >= 8 else 1500
 
     # Determine real GPU name for TDP lookup
     gpu_tdp = 75  # default fallback
@@ -591,8 +587,8 @@ def build_comparison(gpu_match: Optional[Dict], gpus: List[Dict], has_cuda: bool
         speed_rows.append({"label": f"{p['name']} / {p['model']}", "tok_s": p["tok_s"],
                            "color": p["color"], "is_local": False})
     speed_rows.append({
-        "label": f"YOUR PC (GPU) / {gpus[0]['name'] if gpus else 'Local'}",
-        "tok_s": local_tok_s_gpu if (has_cuda and local_tok_s_gpu > 0) else 0,
+        "label": f"YOUR PC ({accel_label}) / {gpus[0]['name'] if gpus else 'Local'}",
+        "tok_s": local_tok_s_gpu if (has_gpu_accel and local_tok_s_gpu > 0) else 0,
         "color": "#3fb950", "is_local": True, "is_gpu": True,
     })
     speed_rows.append({
@@ -634,7 +630,7 @@ def build_comparison(gpu_match: Optional[Dict], gpus: List[Dict], has_cuda: bool
     for p in providers_enriched:
         latency_rows.append({"label": f"{p['model']}", "provider": p["name"],
                              "ms": p["latency_ms"], "color": p["color"], "is_local": False})
-    latency_rows.append({"label": f"{gpus[0]['name'] if gpus else 'Local GPU'} (GPU)",
+    latency_rows.append({"label": f"{gpus[0]['name'] if gpus else 'Local GPU'} ({accel_label})",
                          "provider": "Your PC", "ms": local_latency_ms,
                          "color": "#3fb950", "is_local": True})
     latency_rows.sort(key=lambda x: x["ms"])
@@ -867,6 +863,7 @@ HTML = """<!DOCTYPE html>
   <a href="#gpu">GPU</a>
   <a href="#storage">Storage</a>
   <a href="#os">System</a>
+  <a href="#coding">Coding</a>
   <a href="#models">AI Models</a>
   <a href="#quickstart">Quick Start</a>
   <a href="#guides">Install Guides</a>
@@ -895,11 +892,11 @@ HTML = """<!DOCTYPE html>
     </div>
     <div class="score-details">
       <h2 style="color:{{ data.score_color }}">{{ data.rating }}</h2>
-      <p>Based on your CPU, RAM, GPU VRAM, CUDA availability and overall hardware tier.</p>
+      <p>Based on your CPU, RAM, GPU VRAM, acceleration backend, and overall hardware tier.</p>
       <div class="score-pills">
         <span class="pill">🧠 RAM: {{ data.ram.total_gb }} GB</span>
         <span class="pill">🎮 VRAM: {{ data.best_vram }} GB</span>
-        <span class="pill">⚡ CUDA: {{ "Yes" if data.has_cuda else "No" }}</span>
+        <span class="pill">⚡ GPU Accel: {{ data.gpu_accel_label }}</span>
         <span class="pill">✅ {{ data.runnable_count }} models compatible</span>
         <span class="pill">🚫 {{ data.total_count - data.runnable_count }} models out of reach</span>
       </div>
@@ -983,7 +980,7 @@ HTML = """<!DOCTYPE html>
     {% set match = data.gpu_matches[loop.index0] %}
     <div class="card">
       <div class="card-header">
-        <span class="icon">{{ "🟢" if gpu.cuda else "⚪" }}</span>
+        <span class="icon">{{ "🟢" if gpu.cuda or gpu.metal else "⚪" }}</span>
         <h3>{{ gpu.name }}</h3>
         <span class="vendor">{{ gpu.vendor }}</span>
       </div>
@@ -992,8 +989,8 @@ HTML = """<!DOCTYPE html>
       {% if gpu.vram_used_gb > 0 %}
       <div class="row"><span class="label">VRAM Used</span><span class="value">{{ gpu.vram_used_gb }} GB</span></div>
       {% endif %}
-      <div class="row"><span class="label">CUDA Available</span>
-        <span class="value" style="color:{{ '#3fb950' if gpu.cuda else '#8b949e' }}">{{ "✔ Yes" if gpu.cuda else "✗ No" }}</span></div>
+      <div class="row"><span class="label">GPU Acceleration</span>
+        <span class="value" style="color:{{ '#3fb950' if gpu.cuda or gpu.metal else '#8b949e' }}">{{ "CUDA" if gpu.cuda else "Metal" if gpu.metal else "CPU only" }}</span></div>
       {% if gpu.driver and gpu.driver != "N/A" %}<div class="row"><span class="label">Driver</span><span class="value">{{ gpu.driver }}</span></div>{% endif %}
       {% if gpu.temp_c is not none %}<div class="row"><span class="label">Temperature</span>
         <span class="value" style="color:{{ '#f85149' if gpu.temp_c>85 else '#d29922' if gpu.temp_c>70 else '#3fb950' }}">{{ gpu.temp_c }}°C</span></div>{% endif %}
@@ -1060,21 +1057,60 @@ HTML = """<!DOCTYPE html>
   <div class="card" style="max-width:600px">
     <div class="card-header"><span class="icon">🪟</span><h3>{{ data.os.name }}</h3></div>
     {% if data.os.build %}<div class="row"><span class="label">Build</span><span class="value">{{ data.os.build }}</span></div>{% endif %}
-    <div class="row"><span class="label">DirectX</span><span class="value">{{ data.os.directx }}</span></div>
+    <div class="row"><span class="label">Graphics API</span><span class="value">{{ data.os.directx }}</span></div>
+    <div class="row"><span class="label">Detected Acceleration</span><span class="value">{{ data.gpu_accel_label }}</span></div>
+    {% if data.has_cuda %}
     <div class="row"><span class="label">CUDA Toolkit</span>
-      <span class="value" style="color:{{ '#3fb950' if data.os.cuda_version != 'Not installed' else '#f85149' }}">
-        {{ data.os.cuda_version }}
-        {% if data.os.cuda_version == "Not installed" %}
-        — <a href="https://developer.nvidia.com/cuda-downloads" target="_blank">Install CUDA</a>
-        {% endif %}
-      </span></div>
+      <span class="value" style="color:{{ '#3fb950' if data.os.cuda_version != 'Not installed' else '#f85149' }}">{{ data.os.cuda_version }}</span></div>
+    {% endif %}
     <div class="row"><span class="label">Python Version</span><span class="value">{{ data.os.python }}</span></div>
+  </div>
+</section>
+
+<!-- ── CODING ─────────────────────────────────────────────────────────────── -->
+<section id="coding">
+  <h2>💻 Best Local Coding Models For This PC</h2>
+  <div class="card" style="margin-bottom:1rem">
+    <div class="row"><span class="label">Catalog</span><span class="value">{{ data.catalog_info.source_label }}</span></div>
+    <div class="row"><span class="label">Model Families Loaded</span><span class="value">{{ data.catalog_info.family_count }}</span></div>
+  </div>
+  <div class="model-grid">
+    {% for m in data.coding_recommendations %}
+    <div class="model-card status-{{ m.status }}{% if m.ollama_installed %} installed-model{% endif %}">
+      <div class="model-top">
+        <span class="model-name">{{ m.name }}</span>
+        <span>
+          <span class="status-badge badge-{{ m.status }}">
+            {{ "✨ Excellent" if m.status=="excellent" else "✅ Good" if m.status=="good" else "🐢 CPU Only" if m.status=="cpu_only" else "⚠️ Limited" if m.status=="limited" else "❌ No" }}
+          </span>
+          {% if m.ollama_installed %}<span class="badge-installed">✓ Installed</span>{% endif %}
+        </span>
+      </div>
+      <div class="model-desc">{{ m.description }}</div>
+      <div class="model-meta">
+        <span class="meta-chip">Best size: {{ m.selected_size }}</span>
+        <span class="meta-chip">{{ m.model_size_gb }} GB</span>
+        <span class="stars">{{ "★" * m.quality }}{{ "☆" * (5-m.quality) }}</span>
+        {% for tag in m.tags[:3] %}<tag>{{ tag }}</tag>{% endfor %}
+      </div>
+      <div style="font-size:.73rem;color:var(--muted);margin-top:.5rem">{{ m.note }}</div>
+      {% if m.ollama %}
+      <div class="ollama-cmd">
+        <code>{{ m.ollama }}</code>
+        <button class="copy-btn" onclick="copyCmd('{{ m.ollama }}',this)" title="Copy">📋</button>
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
   </div>
 </section>
 
 <!-- ── MODELS ───────────────────────────────────────────────────────────────── -->
 <section id="models">
   <h2>🤖 Local AI Model Compatibility</h2>
+  <div style="background:#1f6feb14;border:1px solid #1f6feb33;border-radius:8px;padding:.75rem 1rem;font-size:.82rem;color:#8fb7ff;margin-bottom:1rem">
+    Live catalog from Ollama Library: {{ data.catalog_info.family_count }} model families, refreshed automatically. New families and new sizes appear here without manual code updates.
+  </div>
   <div class="cat-tabs">
     <button class="tab-btn active" onclick="filterCat('all',this)">All ({{ data.runnable_count }})</button>
     {% for cat in data.categories %}
@@ -1106,6 +1142,7 @@ HTML = """<!DOCTYPE html>
       </div>
       <div class="model-desc">{{ m.description }}</div>
       <div class="model-meta">
+        <span class="meta-chip">Best size: {{ m.selected_size }}</span>
         <span class="meta-chip">{{ m.model_size_gb }} GB</span>
         <span class="stars">{{ "★" * m.quality }}{{ "☆" * (5-m.quality) }}</span>
         {% for tag in m.tags[:3] %}<tag>{{ tag }}</tag>{% endfor %}
@@ -1125,9 +1162,9 @@ HTML = """<!DOCTYPE html>
 
 <!-- ── QUICK START ──────────────────────────────────────────────────────────── -->
 <section id="quickstart">
-  <h2>🚀 Quick Start — Top Ollama Commands</h2>
+  <h2>🚀 Quick Start — Best Commands For Your Setup</h2>
   <p style="color:var(--muted);font-size:.82rem;margin-bottom:1rem">
-    First install Ollama from <a href="https://ollama.com/download" target="_blank">ollama.com/download</a>, then run these:
+    These are picked from the live catalog for your current hardware, with coding models first.
   </p>
   <ul class="qs-list">
     {% for m in data.quickstart %}
@@ -1214,7 +1251,7 @@ HTML = """<!DOCTYPE html>
     <div class="fin-card">
       <div class="fin-val" style="color:#bc8cff">{{ data.compare.local_latency_ms }}ms</div>
       <div class="fin-label">Your First-Token Latency</div>
-      <div class="fin-sub">{{ "GPU inference (CUDA)" if data.has_cuda else "CPU inference" }}</div>
+      <div class="fin-sub">{{ "GPU inference (" ~ data.gpu_accel_label ~ ")" if data.has_gpu_accel else "CPU inference" }}</div>
     </div>
     {% if data.compare.breakeven_tokens %}
     <div class="fin-card">
@@ -1299,7 +1336,7 @@ HTML = """<!DOCTYPE html>
           <td class="cost-free">$0.00</td>
           <td class="cost-free">$0.00</td>
           <td class="cost-free">${{ data.compare.elec_cost_monthly }}<span style="font-size:.65rem;color:var(--muted)"> elec.</span></td>
-          <td style="color:#3fb950">~{{ data.compare.local_tok_s_gpu if data.has_cuda else data.compare.local_tok_s_cpu }} t/s</td>
+          <td style="color:#3fb950">~{{ data.compare.local_tok_s_gpu if data.has_gpu_accel else data.compare.local_tok_s_cpu }} t/s</td>
           <td>{{ "★★★★☆" if data.score >= 40 else "★★★☆☆" }}</td>
         </tr>
         {% for p in data.compare.providers %}
@@ -1477,18 +1514,22 @@ def collect(port: int) -> Dict:
     gpu_matches = [match_gpu(g["name"]) for g in gpus]
     best_vram   = max((g["vram_gb"] for g in gpus), default=0)
     has_cuda    = any(g["cuda"] for g in gpus)
-    results     = check_compatibility(ram["total_gb"], best_vram, has_cuda)
+    has_gpu_accel = has_gpu_acceleration(gpus)
+    gpu_accel_label = "CUDA" if has_cuda else "Metal" if any(g.get("metal") for g in gpus) else "CPU only"
+
+    catalog = get_live_ollama_catalog()
+    results = build_live_catalog_results(catalog, ram["total_gb"], best_vram, has_gpu_accel)
+
     # Mark models that are already installed via Ollama
     for r in results:
         r["ollama_installed"] = _is_ollama_model_installed(r, ollama_installed)
+
+    coding_recommendations = build_coding_recommendations(results)
+    quickstart = build_quickstart(results)
+
     score, rating = compute_score(cpu, ram, gpus, gpu_matches[0] if gpu_matches else None)
 
     score_color = "#3fb950" if score>=75 else "#d29922" if score>=45 else "#f0883e" if score>=25 else "#f85149"
-
-    # Quick-start: top 5 with ollama command
-    quickstart = [r for r in results if r["status"] in ("excellent","good") and r.get("ollama")][:5]
-    if not quickstart:
-        quickstart = [r for r in results if r.get("ollama")][:5]
 
     # Guides — only for platforms the user can actually run
     needed_platforms = set()
@@ -1500,26 +1541,13 @@ def collect(port: int) -> Dict:
     # Categories
     cats = list(dict.fromkeys(m["category"] for m in results if m["status"] != "no"))
 
-    # Upgrade tips
-    tips = []
-    vram = best_vram
-    if vram < 8:
-        tips.append({"title":"🎯 Priority: GPU VRAM Upgrade",
-                     "body":"Upgrade to a GPU with 8GB+ VRAM (e.g. RTX 3060 / RX 6600 XT). "
-                            "This single change unlocks most 7B language models with GPU acceleration."})
-    if vram < 16:
-        tips.append({"title":"🎯 GPU: 16GB VRAM Tier",
-                     "body":"16GB VRAM (RTX 3080 / RX 6800 XT) enables 13B+ models, Stable Diffusion XL, and FLUX.1."})
-    if ram["total_gb"] < 16:
-        tips.append({"title":"💾 RAM: Add More Memory",
-                     "body":"16GB+ RAM allows comfortable CPU inference of 7B models and running multiple tools in parallel."})
-    if ram["total_gb"] < 32:
-        tips.append({"title":"💾 RAM: 32GB for Power Users",
-                     "body":"32GB RAM enables larger quantized models, multiple AI tools simultaneously, and smooth multitasking."})
-    if not has_cuda:
-        tips.append({"title":"⚡ Consider an NVIDIA GPU",
-                     "body":"NVIDIA GPUs with CUDA provide 10–30× faster AI inference vs CPU. "
-                            "Even an RTX 3060 would massively improve your AI capabilities."})
+    tips = build_upgrade_recommendations(
+        results,
+        ram["total_gb"],
+        best_vram,
+        unified_memory=any(g.get("vendor") == "Apple" for g in gpus),
+        has_gpu_accel=has_gpu_accel,
+    )
 
     # Serialize gpu_matches (may contain None)
     gpu_matches_safe = [m if m else {} for m in gpu_matches]
@@ -1538,19 +1566,23 @@ def collect(port: int) -> Dict:
         "rating":       rating,
         "best_vram":    best_vram,
         "has_cuda":     has_cuda,
+        "has_gpu_accel": has_gpu_accel,
+        "gpu_accel_label": gpu_accel_label,
         "bench_single": bench_single,
         "bench_multi":  bench_multi,
         "models":       results,
+        "coding_recommendations": coding_recommendations,
         "runnable_count": len([r for r in results if r["status"] != "no"]),
         "total_count":  len(results),
         "quickstart":   quickstart,
         "guides":       guides,
         "categories":   cats,
         "upgrade_tips": tips,
+        "catalog_info": {"family_count": catalog.get("family_count", 0), "source_label": catalog.get("source_label", "catalog unavailable")},
         "ollama_running": bool(ollama_installed),
         "ollama_installed_count": len(ollama_installed),
         "ollama_installed_names": sorted(v["full_name"] for v in ollama_installed.values()),
-        "compare":      build_comparison(gpu_matches[0] if gpu_matches else None, gpus, has_cuda, bench_multi),
+        "compare":      build_comparison(gpu_matches[0] if gpu_matches else None, gpus, has_gpu_accel, bench_multi, gpu_accel_label),
     }
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
