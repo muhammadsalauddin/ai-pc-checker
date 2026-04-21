@@ -174,6 +174,19 @@ GPU_DB: Dict[str, Dict] = {
     "Arc A750":     {"tier":"B-","vram": 8,"score": 34,"sd_fps": 4,"tok_s":18},
     "Arc A580":     {"tier":"C+","vram": 8,"score": 28,"sd_fps": 3,"tok_s":12},
     "Arc A380":     {"tier":"C", "vram": 6,"score": 20,"sd_fps": 2,"tok_s": 8},
+    # ── Apple Silicon ─────────────────────────────────────────────
+    "Apple M4 Max":     {"tier":"S", "vram":128,"score": 95,"sd_fps":22,"tok_s":130},
+    "Apple M4 Pro":     {"tier":"A+","vram": 64,"score": 80,"sd_fps":15,"tok_s":100},
+    "Apple M4":         {"tier":"A", "vram": 32,"score": 65,"sd_fps":11,"tok_s": 75},
+    "Apple M3 Max":     {"tier":"A+","vram": 96,"score": 85,"sd_fps":18,"tok_s":110},
+    "Apple M3 Pro":     {"tier":"A", "vram": 36,"score": 70,"sd_fps":13,"tok_s": 85},
+    "Apple M3":         {"tier":"B+","vram": 24,"score": 55,"sd_fps": 9,"tok_s": 60},
+    "Apple M2 Max":     {"tier":"A", "vram": 96,"score": 80,"sd_fps":16,"tok_s": 95},
+    "Apple M2 Pro":     {"tier":"B+","vram": 32,"score": 62,"sd_fps":11,"tok_s": 72},
+    "Apple M2":         {"tier":"B", "vram": 24,"score": 48,"sd_fps": 8,"tok_s": 50},
+    "Apple M1 Max":     {"tier":"A", "vram": 64,"score": 72,"sd_fps":13,"tok_s": 80},
+    "Apple M1 Pro":     {"tier":"B+","vram": 32,"score": 55,"sd_fps": 9,"tok_s": 60},
+    "Apple M1":         {"tier":"B", "vram": 16,"score": 40,"sd_fps": 6,"tok_s": 40},
     # ── Integrated / Mobile ───────────────────────────────────────
     "Intel UHD":    {"tier":"F", "vram": 2,"score":  5,"sd_fps": 0,"tok_s": 2},
     "Intel Iris":   {"tier":"F", "vram": 2,"score":  6,"sd_fps": 0,"tok_s": 3},
@@ -955,6 +968,44 @@ def get_gpu_info() -> List[Dict]:
         except Exception:
             pass
 
+    # Method 4 – Apple Silicon (macOS Metal / Unified Memory)
+    if platform.system() == "Darwin" and not gpus:
+        try:
+            r = subprocess.run(
+                ["system_profiler", "SPDisplaysDataType", "-json"],
+                capture_output=True, text=True, timeout=10
+            )
+            if r.returncode == 0:
+                import re as _re
+                data = json.loads(r.stdout)
+                for disp in data.get("SPDisplaysDataType", []):
+                    name = disp.get("sppci_model", "Apple GPU")
+                    # VRAM field (may say "Shared" for unified memory)
+                    vram_str = (disp.get("spdisplays_vram") or
+                                disp.get("spdisplays_vram_shared") or "")
+                    vram_gb = 0.0
+                    if vram_str:
+                        m = _re.search(r"(\d+)", vram_str)
+                        if m:
+                            v = int(m.group(1))
+                            vram_gb = round(v / 1024, 1) if "MB" in vram_str.upper() else float(v)
+                    # Apple Silicon unified memory — treat total RAM as available VRAM
+                    if vram_gb == 0 and "apple" in name.lower():
+                        vram_gb = round(psutil.virtual_memory().total / (1024 ** 3), 1)
+                    gpus.append({
+                        "name":         name,
+                        "vram_gb":      vram_gb,
+                        "vram_used_gb": 0,
+                        "driver":       "Metal",
+                        "temp_c":       None,
+                        "load_pct":     None,
+                        "vendor":       "Apple",
+                        "cuda":         False,
+                        "metal":        True,
+                    })
+        except Exception:
+            pass
+
     # Fallback – at least show something
     if not gpus:
         gpus.append({
@@ -1016,21 +1067,72 @@ def get_disk_info() -> List[Dict]:
 
 
 def get_os_info() -> Dict:
+    sys_name = platform.system()
     info = {
-        "system": platform.system(),
+        "system": sys_name,
         "release": platform.release(),
         "version": platform.version(),
-        "name": "Windows",
+        "name": sys_name,
         "build": "",
         "edition": "",
         "directx": "Unknown",
         "cuda_version": "Not installed",
         "python": platform.python_version(),
     }
-    # Windows edition
+
+    if sys_name == "Darwin":
+        # macOS
+        try:
+            r = subprocess.run(["sw_vers", "-productVersion"], capture_output=True, text=True, timeout=5)
+            ver = r.stdout.strip() if r.returncode == 0 else platform.mac_ver()[0]
+        except Exception:
+            ver = platform.mac_ver()[0]
+        info["name"] = f"macOS {ver}" if ver else "macOS"
+        info["build"] = platform.release()
+        info["directx"] = "Metal (Apple GPU Framework)"
+        # Check Metal Performance Shaders / MPS via PyTorch if available
+        try:
+            import importlib
+            torch = importlib.import_module("torch")
+            if torch.backends.mps.is_available():
+                info["cuda_version"] = "Metal MPS (available)"
+        except Exception:
+            pass
+        return info
+
+    if sys_name == "Linux":
+        # Linux OS name
+        try:
+            r = subprocess.run(["lsb_release", "-ds"], capture_output=True, text=True, timeout=5)
+            if r.returncode == 0 and r.stdout.strip():
+                info["name"] = r.stdout.strip().strip('"')
+        except Exception:
+            try:
+                with open("/etc/os-release") as f:
+                    for line in f:
+                        if line.startswith("PRETTY_NAME="):
+                            info["name"] = line.split("=", 1)[1].strip().strip('"')
+                            break
+            except Exception:
+                pass
+        info["directx"] = "N/A (Linux)"
+        # CUDA on Linux
+        try:
+            r = subprocess.run(["nvidia-smi"], capture_output=True, text=True, timeout=5)
+            for line in r.stdout.splitlines():
+                if "CUDA Version" in line:
+                    info["cuda_version"] = line.split("CUDA Version:")[-1].strip().split()[0]
+                    break
+        except Exception:
+            pass
+        return info
+
+    # Windows
     raw = _run_ps("(Get-WmiObject Win32_OperatingSystem).Caption")
     if raw:
         info["name"] = raw.splitlines()[0].strip()
+    else:
+        info["name"] = "Windows"
     build = _run_ps("(Get-WmiObject Win32_OperatingSystem).BuildNumber")
     if build:
         info["build"] = build.strip()
