@@ -6,6 +6,13 @@
 #    ./start.sh           — launch web dashboard (opens browser automatically)
 #    ./start.sh --cli     — run terminal / CLI version instead
 #    ./start.sh --help    — show usage
+#
+#  Windows users: This script requires bash.
+#    Option 1: Install Git for Windows (includes bash)
+#              https://git-scm.com/download/win
+#              Then run: "C:\Program Files\Git\bin\bash.exe" start.sh
+#    Option 2: Enable WSL then run: wsl bash start.sh
+#    Option 3: Use start.bat instead (works without bash - auto-detects both)
 # =============================================================================
 
 # ── Colours ───────────────────────────────────────────────────────────────────
