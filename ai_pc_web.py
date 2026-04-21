@@ -14,16 +14,43 @@ from typing  import Dict, List, Optional, Tuple
 REQUIRED = {"psutil": "psutil", "GPUtil": "gputil", "flask": "flask", "cpuinfo": "py-cpuinfo"}
 
 def _auto_install():
+    import importlib
+    # Python version check
+    vi = sys.version_info
+    if vi < (3, 9):
+        print(f"[Setup] WARNING: Python {vi.major}.{vi.minor} detected. Python 3.9+ required.", flush=True)
+    # Upgrade pip first to avoid install failures on Python 3.12/3.13/3.14
+    try:
+        subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "pip", "-q"],
+                       capture_output=True, timeout=60)
+    except Exception:
+        pass
     missing = []
     for imp, pkg in REQUIRED.items():
-        try: __import__(imp)
-        except ImportError: missing.append(pkg)
-    if missing:
-        print(f"[Setup] Installing: {', '.join(missing)} …")
-        for pkg in missing:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", pkg, "-q"],
-                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        print("[Setup] Done.\n")
+        try:
+            importlib.import_module(imp)
+        except ImportError:
+            missing.append((imp, pkg))
+    if not missing:
+        return
+    print(f"[Setup] Installing: {', '.join(p for _,p in missing)} …", flush=True)
+    for imp, pkg in missing:
+        ok = False
+        for extra in ([], ["--user"]):
+            try:
+                r = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", pkg, "-q"] + extra,
+                    capture_output=True, text=True, timeout=120
+                )
+                if r.returncode == 0:
+                    ok = True; break
+            except Exception:
+                pass
+        if not ok:
+            print(f"[Setup] ERROR: Could not auto-install '{pkg}'.", flush=True)
+            print(f"  Please run manually:  pip install {pkg}", flush=True)
+            print(f"  Then restart this script.\n", flush=True)
+    print("[Setup] Done.\n", flush=True)
 
 _auto_install()
 
@@ -115,12 +142,39 @@ AI_MODELS: List[Dict] = [
     {"name":"Mistral Nemo 12B","min_ram_gb":12,"min_vram_gb":8,"model_size_gb":7.1,"cpu_ok":False,"quality":4,"category":"Text / Chat","description":"Latest Mistral with extended context window.","ollama":"ollama run mistral-nemo","lmstudio":"mistral-nemo-instruct-2407","platforms":["Ollama","LM Studio"],"tags":["Long-Context","High-Quality"]},
     {"name":"Llama 3.1 70B (Q4)","min_ram_gb":40,"min_vram_gb":24,"model_size_gb":39.0,"cpu_ok":False,"quality":5,"category":"Text / Chat","description":"GPT-4 level quality. Needs high-end GPU/server.","ollama":"ollama run llama3.1:70b","lmstudio":"meta-llama-3.1-70b-instruct","platforms":["Ollama","LM Studio"],"tags":["GPT-4 Class","Needs 24GB VRAM"]},
     {"name":"Mixtral 8x7B (Q4)","min_ram_gb":32,"min_vram_gb":20,"model_size_gb":26.0,"cpu_ok":False,"quality":5,"category":"Text / Chat","description":"Mixture-of-experts. Excellent reasoning.","ollama":"ollama run mixtral:8x7b","lmstudio":"mixtral-8x7b-instruct","platforms":["Ollama","LM Studio"],"tags":["Reasoning","Expert"]},
+    # ── 2025 New Models ────────────────────────────────────────────
+    {"name":"Phi-4 14B","min_ram_gb":12,"min_vram_gb":8,"model_size_gb":8.2,"cpu_ok":False,"quality":5,"category":"Text / Chat","description":"Microsoft Phi-4 — punches well above its size for reasoning.","ollama":"ollama run phi4","lmstudio":"phi-4-14b-instruct","platforms":["Ollama","LM Studio"],"tags":["Reasoning","High-Quality","2025"]},
+    {"name":"Phi-4 Mini 3.8B","min_ram_gb":4,"min_vram_gb":2,"model_size_gb":2.5,"cpu_ok":True,"quality":4,"category":"Text / Chat","description":"Compact Phi-4 — great reasoning on low-end hardware.","ollama":"ollama run phi4-mini","lmstudio":"phi-4-mini-instruct","platforms":["Ollama","LM Studio"],"tags":["CPU-OK","Reasoning","2025"]},
+    {"name":"Gemma 3 4B","min_ram_gb":6,"min_vram_gb":3,"model_size_gb":3.3,"cpu_ok":True,"quality":4,"category":"Text / Chat","description":"Google Gemma 3 — 128K context, multimodal support.","ollama":"ollama run gemma3:4b","lmstudio":"gemma-3-4b-it","platforms":["Ollama","LM Studio"],"tags":["CPU-OK","Long-Context","2025"]},
+    {"name":"Gemma 3 12B","min_ram_gb":14,"min_vram_gb":8,"model_size_gb":8.1,"cpu_ok":False,"quality":5,"category":"Text / Chat","description":"Google Gemma 3 12B — strong multilingual + vision.","ollama":"ollama run gemma3:12b","lmstudio":"gemma-3-12b-it","platforms":["Ollama","LM Studio"],"tags":["High-Quality","Vision","2025"]},
+    {"name":"Gemma 3 27B (Q4)","min_ram_gb":20,"min_vram_gb":16,"model_size_gb":17.0,"cpu_ok":False,"quality":5,"category":"Text / Chat","description":"Google Gemma 3 27B — Gemini-class quality, open weights.","ollama":"ollama run gemma3:27b","lmstudio":"gemma-3-27b-it","platforms":["Ollama","LM Studio"],"tags":["Flagship","Gemini-Class","2025"]},
+    {"name":"Llama 3.3 70B (Q4)","min_ram_gb":40,"min_vram_gb":24,"model_size_gb":40.0,"cpu_ok":False,"quality":5,"category":"Text / Chat","description":"Meta Llama 3.3 70B — best open-source instruction model.","ollama":"ollama run llama3.3:70b","lmstudio":"meta-llama-3.3-70b-instruct","platforms":["Ollama","LM Studio"],"tags":["Best-Open","GPT-4-Class","2025"]},
+    {"name":"Mistral Small 3 22B","min_ram_gb":16,"min_vram_gb":12,"model_size_gb":13.5,"cpu_ok":False,"quality":5,"category":"Text / Chat","description":"Mistral Small 3 — best mid-size model (2025), beats GPT-4o-mini.","ollama":"ollama run mistral-small3","lmstudio":"mistral-small-3-22b-instruct","platforms":["Ollama","LM Studio"],"tags":["Best-Mid","Recommended","2025"]},
+    {"name":"Mistral Large 2 123B (Q4)","min_ram_gb":80,"min_vram_gb":48,"model_size_gb":70.0,"cpu_ok":False,"quality":5,"category":"Text / Chat","description":"Mistral Large 2 — Claude 3 Opus rival. Needs multi-GPU.","ollama":"ollama run mistral-large2","lmstudio":"mistral-large-2-123b-instruct","platforms":["Ollama","LM Studio"],"tags":["Multi-GPU","Claude-Rival","2025"]},
+    {"name":"Qwen2.5 14B","min_ram_gb":16,"min_vram_gb":10,"model_size_gb":9.0,"cpu_ok":False,"quality":5,"category":"Text / Chat","description":"Alibaba Qwen2.5 14B — excellent multilingual & reasoning.","ollama":"ollama run qwen2.5:14b","lmstudio":"qwen2.5-14b-instruct","platforms":["Ollama","LM Studio"],"tags":["Multilingual","Reasoning","2025"]},
+    {"name":"Qwen2.5 72B (Q4)","min_ram_gb":48,"min_vram_gb":32,"model_size_gb":43.0,"cpu_ok":False,"quality":5,"category":"Text / Chat","description":"Alibaba Qwen2.5 72B — GPT-4 class, top open multilingual.","ollama":"ollama run qwen2.5:72b","lmstudio":"qwen2.5-72b-instruct","platforms":["Ollama","LM Studio"],"tags":["GPT-4-Class","Multilingual","2025"]},
+    {"name":"Qwen3 8B","min_ram_gb":10,"min_vram_gb":6,"model_size_gb":5.5,"cpu_ok":True,"quality":5,"category":"Text / Chat","description":"Alibaba Qwen3 8B — hybrid thinking/chat model, SOTA at its size.","ollama":"ollama run qwen3:8b","lmstudio":"qwen3-8b-instruct","platforms":["Ollama","LM Studio"],"tags":["Thinking","SOTA-8B","2025"]},
+    {"name":"Qwen3 14B","min_ram_gb":16,"min_vram_gb":10,"model_size_gb":9.5,"cpu_ok":False,"quality":5,"category":"Text / Chat","description":"Alibaba Qwen3 14B — hybrid thinking mode, strong reasoning.","ollama":"ollama run qwen3:14b","lmstudio":"qwen3-14b-instruct","platforms":["Ollama","LM Studio"],"tags":["Thinking","Reasoning","2025"]},
+    {"name":"Qwen3 32B (Q4)","min_ram_gb":24,"min_vram_gb":20,"model_size_gb":20.0,"cpu_ok":False,"quality":5,"category":"Text / Chat","description":"Alibaba Qwen3 32B — rivals GPT-4o, thinking + non-thinking modes.","ollama":"ollama run qwen3:32b","lmstudio":"qwen3-32b-instruct","platforms":["Ollama","LM Studio"],"tags":["GPT-4o-Rival","Thinking","2025"]},
+    {"name":"DeepSeek-V3 (Q4)","min_ram_gb":48,"min_vram_gb":32,"model_size_gb":42.0,"cpu_ok":False,"quality":5,"category":"Text / Chat","description":"DeepSeek V3 685B MoE — #1 open model, GPT-4 tier. Multi-GPU needed.","ollama":"ollama run deepseek-v3","lmstudio":"deepseek-v3","platforms":["Ollama","LM Studio"],"tags":["#1-Open","MoE","Multi-GPU","2025"]},
+    {"name":"Kimi K2 (Q4)","min_ram_gb":64,"min_vram_gb":48,"model_size_gb":60.0,"cpu_ok":False,"quality":5,"category":"Text / Chat","description":"Moonshot Kimi K2 1T MoE — top agentic & coding model (2025).","ollama":"ollama run kimi-k2","lmstudio":"kimi-k2","platforms":["Ollama","LM Studio"],"tags":["Agentic","MoE","Multi-GPU","2025"]},
+    {"name":"Claude 3.5 Haiku (via API)","min_ram_gb":4,"min_vram_gb":0,"model_size_gb":0,"cpu_ok":True,"quality":4,"category":"Text / Chat","description":"Anthropic Claude 3.5 Haiku — fastest Claude, API-only.","ollama":None,"lmstudio":None,"platforms":["Anthropic API"],"tags":["API-Only","Fast","Claude"]},
+    {"name":"Claude Sonnet 4.5 (via API)","min_ram_gb":4,"min_vram_gb":0,"model_size_gb":0,"cpu_ok":True,"quality":5,"category":"Text / Chat","description":"Anthropic Claude Sonnet 4.5 — balanced intelligence & speed, API-only.","ollama":None,"lmstudio":None,"platforms":["Anthropic API"],"tags":["API-Only","Recommended","Claude","2025"]},
+    {"name":"Claude Sonnet 4.7 (via API)","min_ram_gb":4,"min_vram_gb":0,"model_size_gb":0,"cpu_ok":True,"quality":5,"category":"Text / Chat","description":"Anthropic Claude Sonnet 4.7 — enhanced reasoning, extended thinking, API-only.","ollama":None,"lmstudio":None,"platforms":["Anthropic API"],"tags":["API-Only","Extended-Thinking","Claude","2025"]},
+    {"name":"Claude Opus 4 (via API)","min_ram_gb":4,"min_vram_gb":0,"model_size_gb":0,"cpu_ok":True,"quality":5,"category":"Text / Chat","description":"Anthropic Claude Opus 4 — most powerful Claude, API-only.","ollama":None,"lmstudio":None,"platforms":["Anthropic API"],"tags":["API-Only","Most-Powerful","Claude","2025"]},
     {"name":"DeepSeek Coder 1.3B","min_ram_gb":3,"min_vram_gb":1,"model_size_gb":0.8,"cpu_ok":True,"quality":3,"category":"Code Generation","description":"Lightweight code model. Works on any PC.","ollama":"ollama run deepseek-coder:1.3b","lmstudio":"deepseek-coder-1.3b-instruct","platforms":["Ollama","LM Studio"],"tags":["Code","CPU-OK","Lightweight"]},
     {"name":"DeepSeek Coder 6.7B","min_ram_gb":8,"min_vram_gb":4,"model_size_gb":3.8,"cpu_ok":True,"quality":4,"category":"Code Generation","description":"Excellent coding assistant, better than Copilot base.","ollama":"ollama run deepseek-coder:6.7b","lmstudio":"deepseek-coder-6.7b-instruct","platforms":["Ollama","LM Studio"],"tags":["Code","Recommended"]},
     {"name":"Qwen2.5-Coder 7B","min_ram_gb":8,"min_vram_gb":4,"model_size_gb":4.5,"cpu_ok":True,"quality":5,"category":"Code Generation","description":"Best open-source code model in 7B class (2024).","ollama":"ollama run qwen2.5-coder:7b","lmstudio":"qwen2.5-coder-7b-instruct","platforms":["Ollama","LM Studio"],"tags":["Code","Best-Code-7B","Recommended"]},
+    {"name":"Qwen2.5-Coder 32B (Q4)","min_ram_gb":24,"min_vram_gb":20,"model_size_gb":20.0,"cpu_ok":False,"quality":5,"category":"Code Generation","description":"SOTA open-source code model — rivals GPT-4o for coding tasks.","ollama":"ollama run qwen2.5-coder:32b","lmstudio":"qwen2.5-coder-32b-instruct","platforms":["Ollama","LM Studio"],"tags":["Code","SOTA-Code","2025"]},
+    {"name":"DeepSeek-R1 7B (Q4)","min_ram_gb":8,"min_vram_gb":5,"model_size_gb":4.7,"cpu_ok":True,"quality":5,"category":"Code Generation","description":"DeepSeek R1 distil 7B — chain-of-thought reasoning for code.","ollama":"ollama run deepseek-r1:7b","lmstudio":"deepseek-r1-7b","platforms":["Ollama","LM Studio"],"tags":["Code","Reasoning","Chain-of-Thought","2025"]},
+    {"name":"DeepSeek-R1 14B (Q4)","min_ram_gb":16,"min_vram_gb":10,"model_size_gb":9.0,"cpu_ok":False,"quality":5,"category":"Code Generation","description":"DeepSeek R1 distil 14B — o1-level reasoning, best local reasoning model.","ollama":"ollama run deepseek-r1:14b","lmstudio":"deepseek-r1-14b","platforms":["Ollama","LM Studio"],"tags":["Code","o1-Rival","Reasoning","2025"]},
+    {"name":"Kimi K2 Coder (Q4)","min_ram_gb":64,"min_vram_gb":48,"model_size_gb":60.0,"cpu_ok":False,"quality":5,"category":"Code Generation","description":"Moonshot Kimi K2 — #1 agentic coding model (2025), rivals Claude Sonnet.","ollama":"ollama run kimi-k2","lmstudio":"kimi-k2","platforms":["Ollama","LM Studio"],"tags":["Code","Agentic","#1-Code","2025"]},
     {"name":"CodeLlama 13B","min_ram_gb":12,"min_vram_gb":8,"model_size_gb":7.3,"cpu_ok":False,"quality":4,"category":"Code Generation","description":"Meta dedicated coding model.","ollama":"ollama run codellama:13b","lmstudio":"codellama-13b-instruct","platforms":["Ollama","LM Studio"],"tags":["Code","GPU-Recommended"]},
     {"name":"LLaVA 7B","min_ram_gb":8,"min_vram_gb":4,"model_size_gb":4.5,"cpu_ok":True,"quality":3,"category":"Vision / Multimodal","description":"Analyze images with a local AI model.","ollama":"ollama run llava:7b","lmstudio":"llava-v1.6-mistral-7b","platforms":["Ollama","LM Studio"],"tags":["Vision","Image-Analysis"]},
     {"name":"LLaVA 13B","min_ram_gb":14,"min_vram_gb":8,"model_size_gb":8.0,"cpu_ok":False,"quality":4,"category":"Vision / Multimodal","description":"Higher quality vision model.","ollama":"ollama run llava:13b","lmstudio":"llava-v1.6-vicuna-13b","platforms":["Ollama","LM Studio"],"tags":["Vision","GPU-Recommended"]},
+    {"name":"Llama 3.2 Vision 11B","min_ram_gb":12,"min_vram_gb":8,"model_size_gb":8.0,"cpu_ok":False,"quality":5,"category":"Vision / Multimodal","description":"Meta's latest vision model — analyze images + documents.","ollama":"ollama run llama3.2-vision:11b","lmstudio":"llama-3.2-11b-vision-instruct","platforms":["Ollama","LM Studio"],"tags":["Vision","2025","Recommended"]},
+    {"name":"Gemma 3 Vision 12B","min_ram_gb":14,"min_vram_gb":8,"model_size_gb":8.1,"cpu_ok":False,"quality":5,"category":"Vision / Multimodal","description":"Google Gemma 3 with native vision and 128K context.","ollama":"ollama run gemma3:12b","lmstudio":"gemma-3-12b-vision","platforms":["Ollama","LM Studio"],"tags":["Vision","Long-Context","2025"]},
+    {"name":"Qwen2.5-VL 7B","min_ram_gb":10,"min_vram_gb":6,"model_size_gb":6.5,"cpu_ok":False,"quality":5,"category":"Vision / Multimodal","description":"Alibaba vision-language model — top open-source VLM (2025).","ollama":"ollama run qwen2.5-vl:7b","lmstudio":"qwen2.5-vl-7b-instruct","platforms":["Ollama","LM Studio"],"tags":["Vision","SOTA-VLM","2025"]},
     {"name":"Stable Diffusion 1.5","min_ram_gb":6,"min_vram_gb":2,"model_size_gb":2.0,"cpu_ok":True,"quality":3,"category":"Image Generation","description":"Classic image generator. 512×512 images.","ollama":None,"lmstudio":None,"platforms":["AUTOMATIC1111","ComfyUI","Invoke AI"],"tags":["Image-Gen","Classic"],"install_url":"https://github.com/AUTOMATIC1111/stable-diffusion-webui"},
     {"name":"Stable Diffusion XL","min_ram_gb":8,"min_vram_gb":6,"model_size_gb":6.5,"cpu_ok":False,"quality":4,"category":"Image Generation","description":"High-quality 1024×1024 image generator.","ollama":None,"lmstudio":None,"platforms":["AUTOMATIC1111","ComfyUI"],"tags":["Image-Gen","1024px"],"install_url":"https://github.com/comfyanonymous/ComfyUI"},
     {"name":"FLUX.1 Schnell","min_ram_gb":16,"min_vram_gb":8,"model_size_gb":11.0,"cpu_ok":False,"quality":5,"category":"Image Generation","description":"State-of-the-art open image model (2024). Ultra-realistic.","ollama":None,"lmstudio":None,"platforms":["ComfyUI"],"tags":["Image-Gen","SOTA","Best-Quality"],"install_url":"https://github.com/comfyanonymous/ComfyUI"},
@@ -190,6 +244,23 @@ def get_gpu_info():
                          "vram_used_gb":round(g.memoryUsed/1024,1),"driver":g.driver,
                          "temp_c":g.temperature,"load_pct":round(g.load*100,1),"vendor":"NVIDIA","cuda":True})
     except Exception: pass
+    # Registry query — 64-bit VRAM (fixes WMI AdapterRAM 4 GB cap for 6/8/12/16 GB cards)
+    _vram_reg={}
+    reg_raw=_run_ps(
+        "$path='HKLM:\\SYSTEM\\ControlSet001\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}';"
+        "Get-ChildItem $path -EA SilentlyContinue|"
+        "Where-Object{$_.PSChildName -match '^\\d{4}$'}|"
+        "ForEach-Object{$p=Get-ItemProperty $_.PSPath -EA SilentlyContinue;"
+        "if($p.DriverDesc){[PSCustomObject]@{Name=$p.DriverDesc;VRAM=$p.'HardwareInformation.qwMemorySize'}}}|"
+        "ConvertTo-Json -Compress"
+    )
+    if reg_raw:
+        try:
+            rd=json.loads(reg_raw); rd=[rd] if isinstance(rd,dict) else rd
+            for entry in rd:
+                n=(entry.get("Name") or "").strip(); v=entry.get("VRAM") or 0
+                if n and v: _vram_reg[n.lower()]=round(int(v)/(1024**3),1)
+        except Exception: pass
     raw=_run_ps("Get-WmiObject Win32_VideoController|Select-Object Name,AdapterRAM,DriverVersion|ConvertTo-Json -Compress")
     if raw:
         try:
@@ -197,8 +268,11 @@ def get_gpu_info():
             for item in d:
                 n=(item.get("Name") or "Unknown GPU").strip()
                 if any(g["name"] in n or n in g["name"] for g in gpus): continue
-                ar=item.get("AdapterRAM") or 0
-                vram=round(int(ar)/(1024**3),1) if ar else 0
+                # Prefer 64-bit registry value over 32-bit WMI AdapterRAM (which caps at ~4 GB)
+                vram=_vram_reg.get(n.lower(),0)
+                if not vram:
+                    ar=item.get("AdapterRAM") or 0
+                    vram=round(int(ar)/(1024**3),1) if ar else 0
                 nl=n.lower()
                 vendor="NVIDIA" if any(x in nl for x in ["nvidia","geforce","rtx","gtx"]) else \
                        "AMD"    if any(x in nl for x in ["amd","radeon","rx "]) else \
@@ -319,6 +393,52 @@ def find_free_port():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("", 0))
         return s.getsockname()[1]
+
+def _fetch_ollama_installed() -> Dict[str, Dict]:
+    """Fetch locally installed Ollama models if Ollama is running on localhost:11434.
+    Returns a dict keyed by lowercase model base-name -> {full_name, size_gb, params}.
+    Uses only stdlib (urllib.request) — no extra install needed."""
+    import urllib.request, urllib.error
+    try:
+        req = urllib.request.Request(
+            "http://localhost:11434/api/tags",
+            headers={"User-Agent": "ai-pc-checker/2.0"}
+        )
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        installed: Dict[str, Dict] = {}
+        for m in data.get("models", []):
+            full  = m.get("name", "")
+            base  = full.split(":")[0].lower().strip()
+            size  = round(m.get("size", 0) / (1024**3), 1)
+            params= m.get("details", {}).get("parameter_size", "")
+            quant = m.get("details", {}).get("quantization_level", "")
+            installed[base] = {
+                "full_name": full,
+                "size_gb":   size,
+                "params":    params,
+                "quant":     quant,
+            }
+        return installed
+    except Exception:
+        return {}
+
+def _is_ollama_model_installed(model_record: Dict, installed: Dict[str, Dict]) -> bool:
+    """Fuzzy-match a model record name against installed Ollama model base names."""
+    name = model_record.get("name", "").lower()
+    ollama_cmd = model_record.get("ollama") or ""
+    # Extract the model tag from the ollama run command (e.g. "ollama run llama3.2:3b" -> "llama3.2")
+    cmd_model = ""
+    if "ollama run " in ollama_cmd:
+        cmd_model = ollama_cmd.replace("ollama run ", "").split(":")[0].lower().strip()
+    for key in installed:
+        if key == cmd_model:
+            return True
+        # Partial name matching (e.g. "llama3.2" in "llama 3.2 3b")
+        key_clean = key.replace("-", " ").replace(".", " ")
+        if key_clean in name or key in name:
+            return True
+    return False
 
 # ─── API vs Local Comparison Data ────────────────────────────────────────────
 # Real-world measured / published benchmarks (April 2026)
@@ -552,6 +672,7 @@ HTML = """<!DOCTYPE html>
   .model-card.status-limited{border-left:3px solid var(--orange)}
   .model-card.status-no{border-left:3px solid #333;opacity:.5}
   .model-card.hidden{display:none}
+  .badge-installed{background:#1f6feb33;color:#58a6ff;border:1px solid #388bfd66;border-radius:4px;padding:2px 7px;font-size:.68rem;font-weight:700;letter-spacing:.02em;margin-left:5px}
   .model-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:.5rem}
   .model-name{font-weight:600;font-size:.9rem}
   .status-badge{font-size:.65rem;font-weight:700;padding:.2rem .55rem;border-radius:10px;text-transform:uppercase;white-space:nowrap}
@@ -895,12 +1016,25 @@ HTML = """<!DOCTYPE html>
     <button class="tab-btn" onclick="filterCat('no',this)" style="color:var(--red)">Not compatible</button>
   </div>
   <div class="model-grid">
+    {% if data.ollama_running %}
+    <div style="grid-column:1/-1;background:#1f6feb22;border:1px solid #388bfd55;border-radius:8px;padding:.75rem 1rem;font-size:.82rem;color:#58a6ff;margin-bottom:.5rem">
+      🟢 <strong>Ollama is running</strong> — {{ data.ollama_installed_count }} model(s) installed locally:
+      {% for n in data.ollama_installed_names %}<code style="background:#0d1117;border-radius:4px;padding:1px 6px;margin:0 2px;font-size:.75rem">{{ n }}</code>{% endfor %}
+    </div>
+    {% else %}
+    <div style="grid-column:1/-1;background:#21262d;border:1px dashed #30363d;border-radius:8px;padding:.75rem 1rem;font-size:.82rem;color:#8b949e;margin-bottom:.5rem">
+      ⚪ Ollama not detected — <a href="https://ollama.com/download" target="_blank" style="color:#58a6ff">Install Ollama</a> to run models locally. Models you install will show a <span class="badge-installed">✓ Installed</span> badge here.
+    </div>
+    {% endif %}
     {% for m in data.models %}
-    <div class="model-card status-{{ m.status }}" data-cat="{{ m.category|replace(' ','_')|replace('/','_') }}" data-status="{{ m.status }}">
+    <div class="model-card status-{{ m.status }}{% if m.ollama_installed %} installed-model{% endif %}" data-cat="{{ m.category|replace(' ','_')|replace('/','_') }}" data-status="{{ m.status }}">
       <div class="model-top">
         <span class="model-name">{{ m.name }}</span>
-        <span class="status-badge badge-{{ m.status }}">
-          {{ "✨ Excellent" if m.status=="excellent" else "✅ Good" if m.status=="good" else "🐢 CPU Only" if m.status=="cpu_only" else "⚠️ Limited" if m.status=="limited" else "❌ No" }}
+        <span>
+          <span class="status-badge badge-{{ m.status }}">
+            {{ "✨ Excellent" if m.status=="excellent" else "✅ Good" if m.status=="good" else "🐢 CPU Only" if m.status=="cpu_only" else "⚠️ Limited" if m.status=="limited" else "❌ No" }}
+          </span>
+          {% if m.ollama_installed %}<span class="badge-installed">✓ Installed</span>{% endif %}
         </span>
       </div>
       <div class="model-desc">{{ m.description }}</div>
@@ -1266,11 +1400,20 @@ def collect(port: int) -> Dict:
     os_info = get_os_info(); print("✓")
     print("  Running CPU benchmark …", end=" ", flush=True)
     bench_single, bench_multi = cpu_benchmark(); print("✓")
+    print("  Checking Ollama …", end=" ", flush=True)
+    ollama_installed = _fetch_ollama_installed()
+    if ollama_installed:
+        print(f"✓  ({len(ollama_installed)} model(s) installed locally)")
+    else:
+        print("✓  (Ollama not running or not installed)")
 
     gpu_matches = [match_gpu(g["name"]) for g in gpus]
     best_vram   = max((g["vram_gb"] for g in gpus), default=0)
     has_cuda    = any(g["cuda"] for g in gpus)
     results     = check_compatibility(ram["total_gb"], best_vram, has_cuda)
+    # Mark models that are already installed via Ollama
+    for r in results:
+        r["ollama_installed"] = _is_ollama_model_installed(r, ollama_installed)
     score, rating = compute_score(cpu, ram, gpus, gpu_matches[0] if gpu_matches else None)
 
     score_color = "#3fb950" if score>=75 else "#d29922" if score>=45 else "#f0883e" if score>=25 else "#f85149"
@@ -1337,6 +1480,9 @@ def collect(port: int) -> Dict:
         "guides":       guides,
         "categories":   cats,
         "upgrade_tips": tips,
+        "ollama_running": bool(ollama_installed),
+        "ollama_installed_count": len(ollama_installed),
+        "ollama_installed_names": sorted(v["full_name"] for v in ollama_installed.values()),
         "compare":      build_comparison(gpu_matches[0] if gpu_matches else None, gpus, has_cuda, bench_multi),
     }
 

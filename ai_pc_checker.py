@@ -34,20 +34,43 @@ REQUIRED = {
 }
 
 def _auto_install():
+    import importlib
+    # Python version check
+    vi = sys.version_info
+    if vi < (3, 9):
+        print(f"\n[Setup] WARNING: Python {vi.major}.{vi.minor} detected. Python 3.9+ required.", flush=True)
+    # Upgrade pip first to avoid install failures on Python 3.12/3.13/3.14
+    try:
+        subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "pip", "-q"],
+                       capture_output=True, timeout=60)
+    except Exception:
+        pass
     missing = []
     for imp, pkg in REQUIRED.items():
         try:
-            __import__(imp)
+            importlib.import_module(imp)
         except ImportError:
-            missing.append(pkg)
-    if missing:
-        print(f"\n[Setup] Installing packages: {', '.join(missing)} …")
-        for pkg in missing:
-            subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", pkg, "-q"],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-        print("[Setup] Done – re-importing...\n")
+            missing.append((imp, pkg))
+    if not missing:
+        return
+    print(f"\n[Setup] Installing packages: {', '.join(p for _,p in missing)} …", flush=True)
+    for imp, pkg in missing:
+        ok = False
+        for extra in ([], ["--user"]):
+            try:
+                r = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", pkg, "-q"] + extra,
+                    capture_output=True, text=True, timeout=120
+                )
+                if r.returncode == 0:
+                    ok = True; break
+            except Exception:
+                pass
+        if not ok:
+            print(f"[Setup] ERROR: Could not auto-install '{pkg}'.", flush=True)
+            print(f"  Please run manually:  pip install {pkg}", flush=True)
+            print(f"  Then restart this script.\n", flush=True)
+    print("[Setup] Done – re-importing...\n", flush=True)
 
 _auto_install()
 
@@ -307,6 +330,183 @@ AI_MODELS: List[Dict] = [
         "platforms": ["Ollama","LM Studio"],
         "tags": ["Reasoning","Expert"],
     },
+    # ── 2025 New Models ───────────────────────────────────────────
+    {
+        "name": "Phi-4 14B",
+        "min_ram_gb": 12,  "min_vram_gb": 8,  "model_size_gb": 8.2,
+        "cpu_ok": False,   "quality": 5,       "category": "Text / Chat",
+        "description": "Microsoft Phi-4 — punches well above its size for reasoning.",
+        "ollama": "ollama run phi4",
+        "lmstudio": "phi-4-14b-instruct",
+        "platforms": ["Ollama","LM Studio"],
+        "tags": ["Reasoning","High-Quality","2025"],
+    },
+    {
+        "name": "Phi-4 Mini 3.8B",
+        "min_ram_gb": 4,   "min_vram_gb": 2,  "model_size_gb": 2.5,
+        "cpu_ok": True,    "quality": 4,       "category": "Text / Chat",
+        "description": "Compact Phi-4 — great reasoning on low-end hardware.",
+        "ollama": "ollama run phi4-mini",
+        "lmstudio": "phi-4-mini-instruct",
+        "platforms": ["Ollama","LM Studio"],
+        "tags": ["CPU-OK","Reasoning","2025"],
+    },
+    {
+        "name": "Gemma 3 4B",
+        "min_ram_gb": 6,   "min_vram_gb": 3,  "model_size_gb": 3.3,
+        "cpu_ok": True,    "quality": 4,       "category": "Text / Chat",
+        "description": "Google Gemma 3 — 128K context, multimodal support.",
+        "ollama": "ollama run gemma3:4b",
+        "lmstudio": "gemma-3-4b-it",
+        "platforms": ["Ollama","LM Studio"],
+        "tags": ["CPU-OK","Long-Context","2025"],
+    },
+    {
+        "name": "Gemma 3 12B",
+        "min_ram_gb": 14,  "min_vram_gb": 8,  "model_size_gb": 8.1,
+        "cpu_ok": False,   "quality": 5,       "category": "Text / Chat",
+        "description": "Google Gemma 3 12B — strong multilingual + vision.",
+        "ollama": "ollama run gemma3:12b",
+        "lmstudio": "gemma-3-12b-it",
+        "platforms": ["Ollama","LM Studio"],
+        "tags": ["High-Quality","Vision","2025"],
+    },
+    {
+        "name": "Gemma 3 27B (Q4)",
+        "min_ram_gb": 20,  "min_vram_gb": 16, "model_size_gb": 17.0,
+        "cpu_ok": False,   "quality": 5,       "category": "Text / Chat",
+        "description": "Google Gemma 3 27B — Gemini-class quality, open weights.",
+        "ollama": "ollama run gemma3:27b",
+        "lmstudio": "gemma-3-27b-it",
+        "platforms": ["Ollama","LM Studio"],
+        "tags": ["Flagship","Gemini-Class","2025"],
+    },
+    {
+        "name": "Llama 3.3 70B (Q4)",
+        "min_ram_gb": 40,  "min_vram_gb": 24, "model_size_gb": 40.0,
+        "cpu_ok": False,   "quality": 5,       "category": "Text / Chat",
+        "description": "Meta Llama 3.3 70B — best open-source instruction model.",
+        "ollama": "ollama run llama3.3:70b",
+        "lmstudio": "meta-llama-3.3-70b-instruct",
+        "platforms": ["Ollama","LM Studio"],
+        "tags": ["Best-Open","GPT-4-Class","2025"],
+    },
+    {
+        "name": "Mistral Small 3 22B",
+        "min_ram_gb": 16,  "min_vram_gb": 12, "model_size_gb": 13.5,
+        "cpu_ok": False,   "quality": 5,       "category": "Text / Chat",
+        "description": "Mistral Small 3 22B — beats GPT-4o-mini, best mid-size (2025).",
+        "ollama": "ollama run mistral-small3",
+        "lmstudio": "mistral-small-3-22b-instruct",
+        "platforms": ["Ollama","LM Studio"],
+        "tags": ["Best-Mid","Recommended","2025"],
+    },
+    {
+        "name": "Qwen2.5 14B",
+        "min_ram_gb": 16,  "min_vram_gb": 10, "model_size_gb": 9.0,
+        "cpu_ok": False,   "quality": 5,       "category": "Text / Chat",
+        "description": "Alibaba Qwen2.5 14B — excellent multilingual & reasoning.",
+        "ollama": "ollama run qwen2.5:14b",
+        "lmstudio": "qwen2.5-14b-instruct",
+        "platforms": ["Ollama","LM Studio"],
+        "tags": ["Multilingual","Reasoning","2025"],
+    },
+    {
+        "name": "Qwen2.5 72B (Q4)",
+        "min_ram_gb": 48,  "min_vram_gb": 32, "model_size_gb": 43.0,
+        "cpu_ok": False,   "quality": 5,       "category": "Text / Chat",
+        "description": "Alibaba Qwen2.5 72B — GPT-4 class, top open multilingual.",
+        "ollama": "ollama run qwen2.5:72b",
+        "lmstudio": "qwen2.5-72b-instruct",
+        "platforms": ["Ollama","LM Studio"],
+        "tags": ["GPT-4-Class","Multilingual","2025"],
+    },
+    {
+        "name": "Qwen3 8B",
+        "min_ram_gb": 10,  "min_vram_gb": 6,  "model_size_gb": 5.5,
+        "cpu_ok": True,    "quality": 5,       "category": "Text / Chat",
+        "description": "Alibaba Qwen3 8B — hybrid thinking/chat, SOTA at its size.",
+        "ollama": "ollama run qwen3:8b",
+        "lmstudio": "qwen3-8b-instruct",
+        "platforms": ["Ollama","LM Studio"],
+        "tags": ["Thinking","SOTA-8B","2025"],
+    },
+    {
+        "name": "Qwen3 14B",
+        "min_ram_gb": 16,  "min_vram_gb": 10, "model_size_gb": 9.5,
+        "cpu_ok": False,   "quality": 5,       "category": "Text / Chat",
+        "description": "Alibaba Qwen3 14B — hybrid thinking mode, strong reasoning.",
+        "ollama": "ollama run qwen3:14b",
+        "lmstudio": "qwen3-14b-instruct",
+        "platforms": ["Ollama","LM Studio"],
+        "tags": ["Thinking","Reasoning","2025"],
+    },
+    {
+        "name": "Qwen3 32B (Q4)",
+        "min_ram_gb": 24,  "min_vram_gb": 20, "model_size_gb": 20.0,
+        "cpu_ok": False,   "quality": 5,       "category": "Text / Chat",
+        "description": "Alibaba Qwen3 32B — rivals GPT-4o, thinking + non-thinking modes.",
+        "ollama": "ollama run qwen3:32b",
+        "lmstudio": "qwen3-32b-instruct",
+        "platforms": ["Ollama","LM Studio"],
+        "tags": ["GPT-4o-Rival","Thinking","2025"],
+    },
+    {
+        "name": "DeepSeek-V3 (Q4)",
+        "min_ram_gb": 48,  "min_vram_gb": 32, "model_size_gb": 42.0,
+        "cpu_ok": False,   "quality": 5,       "category": "Text / Chat",
+        "description": "DeepSeek V3 685B MoE — #1 open model. Multi-GPU needed.",
+        "ollama": "ollama run deepseek-v3",
+        "lmstudio": "deepseek-v3",
+        "platforms": ["Ollama","LM Studio"],
+        "tags": ["#1-Open","MoE","Multi-GPU","2025"],
+    },
+    {
+        "name": "Kimi K2 (Q4)",
+        "min_ram_gb": 64,  "min_vram_gb": 48, "model_size_gb": 60.0,
+        "cpu_ok": False,   "quality": 5,       "category": "Text / Chat",
+        "description": "Moonshot Kimi K2 1T MoE — top agentic & coding model (2025).",
+        "ollama": "ollama run kimi-k2",
+        "lmstudio": "kimi-k2",
+        "platforms": ["Ollama","LM Studio"],
+        "tags": ["Agentic","MoE","Multi-GPU","2025"],
+    },
+    {
+        "name": "Claude 3.5 Haiku (via API)",
+        "min_ram_gb": 4,   "min_vram_gb": 0,  "model_size_gb": 0,
+        "cpu_ok": True,    "quality": 4,       "category": "Text / Chat",
+        "description": "Anthropic Claude 3.5 Haiku — fastest Claude, API-only.",
+        "ollama": None,    "lmstudio": None,
+        "platforms": ["Anthropic API"],
+        "tags": ["API-Only","Fast","Claude"],
+    },
+    {
+        "name": "Claude Sonnet 4.5 (via API)",
+        "min_ram_gb": 4,   "min_vram_gb": 0,  "model_size_gb": 0,
+        "cpu_ok": True,    "quality": 5,       "category": "Text / Chat",
+        "description": "Anthropic Claude Sonnet 4.5 — balanced intelligence & speed, API-only.",
+        "ollama": None,    "lmstudio": None,
+        "platforms": ["Anthropic API"],
+        "tags": ["API-Only","Recommended","Claude","2025"],
+    },
+    {
+        "name": "Claude Sonnet 4.7 (via API)",
+        "min_ram_gb": 4,   "min_vram_gb": 0,  "model_size_gb": 0,
+        "cpu_ok": True,    "quality": 5,       "category": "Text / Chat",
+        "description": "Anthropic Claude Sonnet 4.7 — enhanced reasoning, extended thinking, API-only.",
+        "ollama": None,    "lmstudio": None,
+        "platforms": ["Anthropic API"],
+        "tags": ["API-Only","Extended-Thinking","Claude","2025"],
+    },
+    {
+        "name": "Claude Opus 4 (via API)",
+        "min_ram_gb": 4,   "min_vram_gb": 0,  "model_size_gb": 0,
+        "cpu_ok": True,    "quality": 5,       "category": "Text / Chat",
+        "description": "Anthropic Claude Opus 4 — most powerful Claude, API-only.",
+        "ollama": None,    "lmstudio": None,
+        "platforms": ["Anthropic API"],
+        "tags": ["API-Only","Most-Powerful","Claude","2025"],
+    },
     # ── Code Models ───────────────────────────────────────────────
     {
         "name": "DeepSeek Coder 1.3B",
@@ -339,6 +539,46 @@ AI_MODELS: List[Dict] = [
         "tags": ["Code","Best-Code-7B","Recommended"],
     },
     {
+        "name": "Qwen2.5-Coder 32B (Q4)",
+        "min_ram_gb": 24,  "min_vram_gb": 20, "model_size_gb": 20.0,
+        "cpu_ok": False,   "quality": 5,       "category": "Code Generation",
+        "description": "SOTA open-source code model — rivals GPT-4o for coding.",
+        "ollama": "ollama run qwen2.5-coder:32b",
+        "lmstudio": "qwen2.5-coder-32b-instruct",
+        "platforms": ["Ollama","LM Studio"],
+        "tags": ["Code","SOTA-Code","2025"],
+    },
+    {
+        "name": "DeepSeek-R1 7B (Q4)",
+        "min_ram_gb": 8,   "min_vram_gb": 5,  "model_size_gb": 4.7,
+        "cpu_ok": True,    "quality": 5,       "category": "Code Generation",
+        "description": "DeepSeek R1 distil 7B — chain-of-thought reasoning for code.",
+        "ollama": "ollama run deepseek-r1:7b",
+        "lmstudio": "deepseek-r1-7b",
+        "platforms": ["Ollama","LM Studio"],
+        "tags": ["Code","Reasoning","Chain-of-Thought","2025"],
+    },
+    {
+        "name": "DeepSeek-R1 14B (Q4)",
+        "min_ram_gb": 16,  "min_vram_gb": 10, "model_size_gb": 9.0,
+        "cpu_ok": False,   "quality": 5,       "category": "Code Generation",
+        "description": "DeepSeek R1 distil 14B — o1-level reasoning, best local reasoning model.",
+        "ollama": "ollama run deepseek-r1:14b",
+        "lmstudio": "deepseek-r1-14b",
+        "platforms": ["Ollama","LM Studio"],
+        "tags": ["Code","o1-Rival","Reasoning","2025"],
+    },
+    {
+        "name": "Kimi K2 Coder (Q4)",
+        "min_ram_gb": 64,  "min_vram_gb": 48, "model_size_gb": 60.0,
+        "cpu_ok": False,   "quality": 5,       "category": "Code Generation",
+        "description": "Moonshot Kimi K2 — #1 agentic coding model (2025), rivals Claude Sonnet.",
+        "ollama": "ollama run kimi-k2",
+        "lmstudio": "kimi-k2",
+        "platforms": ["Ollama","LM Studio"],
+        "tags": ["Code","Agentic","#1-Code","2025"],
+    },
+    {
         "name": "CodeLlama 13B",
         "min_ram_gb": 12,  "min_vram_gb": 8,  "model_size_gb": 7.3,
         "cpu_ok": False,   "quality": 4,       "category": "Code Generation",
@@ -368,6 +608,36 @@ AI_MODELS: List[Dict] = [
         "lmstudio": "llava-v1.6-vicuna-13b",
         "platforms": ["Ollama","LM Studio"],
         "tags": ["Vision","GPU-Recommended"],
+    },
+    {
+        "name": "Llama 3.2 Vision 11B",
+        "min_ram_gb": 12,  "min_vram_gb": 8,  "model_size_gb": 8.0,
+        "cpu_ok": False,   "quality": 5,       "category": "Vision / Multimodal",
+        "description": "Meta's latest vision model — analyze images + documents.",
+        "ollama": "ollama run llama3.2-vision:11b",
+        "lmstudio": "llama-3.2-11b-vision-instruct",
+        "platforms": ["Ollama","LM Studio"],
+        "tags": ["Vision","2025","Recommended"],
+    },
+    {
+        "name": "Gemma 3 Vision 12B",
+        "min_ram_gb": 14,  "min_vram_gb": 8,  "model_size_gb": 8.1,
+        "cpu_ok": False,   "quality": 5,       "category": "Vision / Multimodal",
+        "description": "Google Gemma 3 with native vision and 128K context.",
+        "ollama": "ollama run gemma3:12b",
+        "lmstudio": "gemma-3-12b-vision",
+        "platforms": ["Ollama","LM Studio"],
+        "tags": ["Vision","Long-Context","2025"],
+    },
+    {
+        "name": "Qwen2.5-VL 7B",
+        "min_ram_gb": 10,  "min_vram_gb": 6,  "model_size_gb": 6.5,
+        "cpu_ok": False,   "quality": 5,       "category": "Vision / Multimodal",
+        "description": "Alibaba vision-language model — top open-source VLM (2025).",
+        "ollama": "ollama run qwen2.5-vl:7b",
+        "lmstudio": "qwen2.5-vl-7b-instruct",
+        "platforms": ["Ollama","LM Studio"],
+        "tags": ["Vision","SOTA-VLM","2025"],
     },
     # ── Image Generation ──────────────────────────────────────────
     {
@@ -619,7 +889,29 @@ def get_gpu_info() -> List[Dict]:
     except Exception:
         pass
 
-    # Method 2 – PowerShell WMI (all GPUs including AMD/Intel)
+    # Method 2 – Registry 64-bit VRAM lookup (fixes Win32_VideoController AdapterRAM 4 GB cap)
+    _vram_reg: Dict[str, float] = {}
+    reg_raw = _run_ps(
+        "$path='HKLM:\\SYSTEM\\ControlSet001\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}';"
+        "Get-ChildItem $path -EA SilentlyContinue|"
+        "Where-Object{$_.PSChildName -match '^\\d{4}$'}|"
+        "ForEach-Object{$p=Get-ItemProperty $_.PSPath -EA SilentlyContinue;"
+        "if($p.DriverDesc){[PSCustomObject]@{Name=$p.DriverDesc;VRAM=$p.'HardwareInformation.qwMemorySize'}}}|"
+        "ConvertTo-Json -Compress"
+    )
+    if reg_raw:
+        try:
+            rd = json.loads(reg_raw)
+            if isinstance(rd, dict): rd = [rd]
+            for entry in rd:
+                rn = (entry.get("Name") or "").strip()
+                rv = entry.get("VRAM") or 0
+                if rn and rv:
+                    _vram_reg[rn.lower()] = round(int(rv) / (1024**3), 1)
+        except Exception:
+            pass
+
+    # Method 3 – PowerShell WMI (all GPUs including AMD/Intel)
     raw = _run_ps(
         "Get-WmiObject Win32_VideoController | "
         "Select-Object Name,AdapterRAM,DriverVersion,VideoProcessor | "
@@ -635,8 +927,11 @@ def get_gpu_info() -> List[Dict]:
                 # Skip if we already have from GPUtil
                 if any(g["name"] in name or name in g["name"] for g in gpus):
                     continue
-                ar = d.get("AdapterRAM") or 0
-                vram = round(int(ar) / (1024**3), 1) if ar else 0
+                # Prefer 64-bit registry value over 32-bit WMI AdapterRAM (which caps at ~4 GB)
+                vram = _vram_reg.get(name.lower(), 0)
+                if not vram:
+                    ar = d.get("AdapterRAM") or 0
+                    vram = round(int(ar) / (1024**3), 1) if ar else 0
 
                 vendor = "Unknown"
                 nl = name.lower()
